@@ -45,9 +45,17 @@ def generate_report(
     # ── Aggregate by region ───────────────────────────────────────────────────
     region_counts: Dict[str, int] = {}
     region_max_mag: Dict[str, float] = {}
+    region_risk_scores: Dict[str, List[float]] = {}
+    
     for ev in events:
         region_counts[ev.region_id] = region_counts.get(ev.region_id, 0) + 1
         region_max_mag[ev.region_id] = max(region_max_mag.get(ev.region_id, 0.0), ev.magnitude)
+        region_risk_scores.setdefault(ev.region_id, []).append(ev.risk_score)
+
+    region_avg_risk: Dict[str, float] = {
+        rid: round(sum(scores) / len(scores), 1)
+        for rid, scores in region_risk_scores.items()
+    }
 
     max_mag_event: Optional[SeismicEvent] = max(events, key=lambda e: e.magnitude) if events else None
 
@@ -105,10 +113,13 @@ def generate_report(
     # Region breakdown
     lines.append("\n---")
     lines.append("\n## 🗺️ Events by Region\n")
-    lines.append("| Region | Events | Max Magnitude |")
-    lines.append("|---|---|---|")
+    lines.append("| Region | Events | Max Magnitude | Avg Risk Score |")
+    lines.append("|---|---|---|---|")
     for rid, cnt in sorted(region_counts.items(), key=lambda x: x[1], reverse=True):
-        lines.append(f"| {rid} | {cnt} | {region_max_mag.get(rid, 0.0):.1f} |")
+        lines.append(
+            f"| {rid} | {cnt} | {region_max_mag.get(rid, 0.0):.1f} | "
+            f"{region_avg_risk.get(rid, 0.0):.1f} |"
+        )
 
     lines.append("\n---")
     lines.append(

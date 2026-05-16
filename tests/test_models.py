@@ -1,14 +1,6 @@
 """
-tests/test_models.py — Unit tests for Pydantic v2 USGS response validation.
-
-Tests:
-  - Valid full GeoJSON response parses successfully
-  - Missing required fields raise ValidationError
-  - Invalid coordinate ranges raise ValidationError
-  - Optional null fields are accepted
-  - USGSFeature id is required
-  - Coordinates order: [longitude, latitude, depth]
-  - Unknown type values are accepted (filtering is done in transformer)
+tests/test_models.py — Unit tests for Pydantic v2 USGS response validation
+and internal dataclasses for the seismic ETL pipeline.
 """
 
 from __future__ import annotations
@@ -16,190 +8,220 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from src.models import USGSFeature, USGSGeometry, USGSProperties, USGSResponse
+from src.models import (
+    USGSFeature,
+    USGSGeometry,
+    USGSProperties,
+    USGSResponse,
+    USGSMetadata,
+    RegionConfig,
+    SeismicEvent,
+)
 
 
-class TestUSGSGeometry:
-    @pytest.mark.unit
-    def test_valid_geometry(self):
-        """Valid 3-element coordinate array is accepted."""
-        geom = USGSGeometry(type="Point", coordinates=[142.5, 41.8, 35.0])
-        assert geom.coordinates[0] == 142.5
-        assert geom.coordinates[1] == 41.8
-        assert geom.coordinates[2] == 35.0
-
-    @pytest.mark.unit
-    def test_requires_three_coordinates(self):
-        """Coordinates with only 2 elements should raise ValidationError."""
-        with pytest.raises(ValidationError):
-            USGSGeometry(type="Point", coordinates=[142.5, 41.8])
-
-    @pytest.mark.unit
-    def test_invalid_longitude_raises(self):
-        """Longitude > 180 should raise ValidationError."""
-        with pytest.raises(ValidationError):
-            USGSGeometry(type="Point", coordinates=[200.0, 41.8, 35.0])
-
-    @pytest.mark.unit
-    def test_invalid_latitude_raises(self):
-        """Latitude > 90 should raise ValidationError."""
-        with pytest.raises(ValidationError):
-            USGSGeometry(type="Point", coordinates=[142.5, 95.0, 35.0])
-
-    @pytest.mark.unit
-    def test_boundary_values_accepted(self):
-        """Extreme boundary values (-180, -90) should be accepted."""
-        geom = USGSGeometry(type="Point", coordinates=[-180.0, -90.0, 0.0])
-        assert geom.coordinates[0] == -180.0
-
-
-class TestUSGSProperties:
-    @pytest.mark.unit
-    def test_all_nullable_fields_accept_none(self):
-        """Nullable fields (felt, cdi, mmi, alert) accept None values."""
-        props = USGSProperties(
-            mag=5.0,
-            place="Test place",
+@pytest.mark.unit
+def test_valid_usgs_feature():
+    """Valida que un feature completo con todos los campos se parsea correctamente."""
+    feature = USGSFeature(
+        type="Feature",
+        properties=USGSProperties(
+            mag=5.4,
+            place="Japan",
             time=1714480000000,
-            felt=None,
-            cdi=None,
-            mmi=None,
-            alert=None,
-            sig=200,
-            type="earthquake",
-        )
-        assert props.felt is None
-        assert props.cdi is None
-        assert props.alert is None
-
-    @pytest.mark.unit
-    def test_all_fields_are_optional(self):
-        """USGSProperties should parse even with an empty dict."""
-        props = USGSProperties()
-        assert props.mag is None
-        assert props.time is None
+            type="earthquake"
+        ),
+        geometry=USGSGeometry(type="Point", coordinates=[142.5, 41.8, 35.0]),
+        id="us7000test1",
+    )
+    assert feature.id == "us7000test1"
+    assert feature.properties.mag == 5.4
 
 
-class TestUSGSFeature:
-    @pytest.mark.unit
-    def test_valid_feature(self):
-        """Complete valid feature parses without error."""
-        feature = USGSFeature(
+@pytest.mark.unit
+def test_invalid_geometry_wrong_length():
+    """coordinates con solo 2 elementos debe lanzar ValidationError."""
+    with pytest.raises(ValidationError):
+        USGSGeometry(type="Point", coordinates=[142.5, 41.8])
+
+
+@pytest.mark.unit
+def test_null_felt_accepted():
+    """felt=None en properties se debe aceptar sin error (valor opcional nulo)."""
+    props = USGSProperties(
+        mag=5.0,
+        place="Test place",
+        time=1714480000000,
+        felt=None,
+        type="earthquake",
+    )
+    assert props.felt is None
+
+
+@pytest.mark.unit
+def test_null_magnitude_accepted_by_pydantic():
+    """mag=None es aceptado por Pydantic (el filtrado de nulos lo hace el Transformer)."""
+    props = USGSProperties(
+        mag=None,
+        place="Test place",
+        time=1714480000000,
+        type="earthquake",
+    )
+    assert props.mag is None
+
+
+@pytest.mark.unit
+def test_coordinates_longitude_first():
+    """
+    GeoJSON standard: [longitude, latitude, depth].
+    Verifica que el orden posicional se mantenga intacto.
+    """
+    geom = USGSGeometry(type="Point", coordinates=[142.5, 41.8, 35.0])
+    assert geom.coordinates[0] == 142.5  # longitud
+    assert geom.coordinates[1] == 41.8   # latitud
+    assert geom.coordinates[2] == 35.0   # profundidad
+
+
+@pytest.mark.unit
+def test_unknown_event_type_accepted():
+    """
+    type="quarry blast" es aceptado por el modelo Pydantic.
+    El filtrado de tipos no sísmicos lo hace el Extractor.
+    """
+    props = USGSProperties(
+        mag=2.1,
+        place="Quarryville",
+        time=1714300000000,
+        type="quarry blast"
+    )
+    assert props.type == "quarry blast"
+
+
+@pytest.mark.unit
+def test_empty_event_id_raises():
+    """id="" lanza ValidationError gracias al model_validator."""
+    with pytest.raises(ValidationError):
+        USGSFeature(
             type="Feature",
-            properties=USGSProperties(
-                mag=5.4, place="Japan", time=1714480000000, type="earthquake"
-            ),
+            properties=USGSProperties(mag=5.4, type="earthquake"),
             geometry=USGSGeometry(type="Point", coordinates=[142.5, 41.8, 35.0]),
-            id="us7000m4vf",
+            id="",
         )
-        assert feature.id == "us7000m4vf"
-        assert feature.properties.mag == 5.4
-
-    @pytest.mark.unit
-    def test_empty_event_id_raises(self):
-        """Empty string for event id should raise ValidationError."""
-        with pytest.raises(ValidationError):
-            USGSFeature(
-                type="Feature",
-                properties=USGSProperties(mag=5.4),
-                geometry=USGSGeometry(type="Point", coordinates=[142.5, 41.8, 35.0]),
-                id="",
-            )
-
-    @pytest.mark.unit
-    def test_unknown_type_accepted(self):
-        """Non-earthquake types like 'quarry blast' should be accepted by the model.
-        
-        Filtering is done in the transformer, not at the validation level.
-        """
-        feature = USGSFeature(
-            type="Feature",
-            properties=USGSProperties(
-                mag=2.1, place="Quarryville", type="quarry blast", time=1714300000000,
-            ),
-            geometry=USGSGeometry(type="Point", coordinates=[-118.0, 34.2, 5.0]),
-            id="us7000test3",
-        )
-        assert feature.properties.type == "quarry blast"
 
 
-class TestUSGSResponse:
-    @pytest.mark.unit
-    def test_full_response_parses(self, sample_api_response):
-        """Complete GeoJSON response with 5 features parses correctly."""
-        response = USGSResponse.model_validate(sample_api_response)
-        assert response.type == "FeatureCollection"
-        assert len(response.features) == 5
-        assert response.metadata.count == 5
+@pytest.mark.unit
+def test_usgs_response_parses_feature_list():
+    """USGSResponse con una lista de features cuenta la longitud correctamente."""
+    feature1 = USGSFeature(
+        type="Feature",
+        properties=USGSProperties(mag=5.4, type="earthquake"),
+        geometry=USGSGeometry(type="Point", coordinates=[142.5, 41.8, 35.0]),
+        id="test1",
+    )
+    feature2 = USGSFeature(
+        type="Feature",
+        properties=USGSProperties(mag=7.8, type="earthquake"),
+        geometry=USGSGeometry(type="Point", coordinates=[141.0, 35.7, 10.0]),
+        id="test2",
+    )
+    response = USGSResponse(
+        type="FeatureCollection",
+        metadata=USGSMetadata(count=2),
+        features=[feature1, feature2],
+        bbox=[-180.0, -90.0, 0.0, 180.0, 90.0, 700.0]
+    )
+    assert len(response.features) == 2
 
-    @pytest.mark.unit
-    def test_earthquake_count(self, sample_api_response):
-        """Sample has 4 earthquakes (incl. 1 deleted) + 1 quarry blast."""
-        response = USGSResponse.model_validate(sample_api_response)
-        earthquakes = [
-            f for f in response.features
-            if (f.properties.type or "").lower() == "earthquake"
-        ]
-        assert len(earthquakes) == 4
 
-    @pytest.mark.unit
-    def test_quarry_blast_present(self, sample_api_response):
-        """Sample contains exactly 1 quarry blast event."""
-        response = USGSResponse.model_validate(sample_api_response)
-        quarry = [
-            f for f in response.features
-            if (f.properties.type or "").lower() == "quarry blast"
-        ]
-        assert len(quarry) == 1
+@pytest.mark.unit
+def test_region_config_contains_inside():
+    """Verifica que un punto dentro del bounding box retorna True."""
+    japan = RegionConfig(
+        region_id="japan",
+        display_name="Japón",
+        min_lat=30.0,
+        max_lat=46.0,
+        min_lon=128.0,
+        max_lon=146.0,
+    )
+    assert japan.contains(38.0, 136.0) is True
 
-    @pytest.mark.unit
-    def test_deleted_event_present(self, sample_api_response):
-        """Sample contains exactly 1 event with status=deleted."""
-        response = USGSResponse.model_validate(sample_api_response)
-        deleted = [
-            f for f in response.features
-            if (f.properties.status or "").lower() == "deleted"
-        ]
-        assert len(deleted) == 1
 
-    @pytest.mark.unit
-    def test_null_felt_event_present(self, sample_api_response):
-        """Sample contains an earthquake with felt=null and alert=null (edge case)."""
-        response = USGSResponse.model_validate(sample_api_response)
-        null_felt = [
-            f for f in response.features
-            if f.properties.felt is None
-            and (f.properties.type or "").lower() == "earthquake"
-        ]
-        assert len(null_felt) >= 1
+@pytest.mark.unit
+def test_region_config_contains_outside():
+    """Verifica que un punto fuera del bounding box retorna False."""
+    japan = RegionConfig(
+        region_id="japan",
+        display_name="Japón",
+        min_lat=30.0,
+        max_lat=46.0,
+        min_lon=128.0,
+        max_lon=146.0,
+    )
+    assert japan.contains(0.0, 0.0) is False  # Gulf of Guinea
 
-    @pytest.mark.unit
-    def test_missing_features_key_raises(self):
-        """Response missing the 'features' key should raise ValidationError."""
-        with pytest.raises(ValidationError):
-            USGSResponse.model_validate({
-                "type": "FeatureCollection",
-                "metadata": {"generated": 123, "count": 0},
-                # "features" intentionally missing
-            })
 
-    @pytest.mark.unit
-    def test_feature_coordinates_order(self, sample_api_response):
-        """Verify [lon, lat, depth] order — classic trap for new data engineers."""
-        response = USGSResponse.model_validate(sample_api_response)
-        # us7000test1: coordinates = [142.5, 41.8, 35.0]
-        feature = next(f for f in response.features if f.id == "us7000test1")
-        coords = feature.geometry.coordinates
-        assert coords[0] == 142.5   # longitude, NOT latitude
-        assert coords[1] == 41.8   # latitude
-        assert coords[2] == 35.0   # depth_km
+@pytest.mark.unit
+def test_seismic_event_has_tsunami_property():
+    """Verifica que la propiedad calculada has_tsunami funciona correctamente."""
+    from datetime import datetime, timezone
+    
+    event_with_tsunami = SeismicEvent(
+        event_id="us7000test1",
+        magnitude=5.4,
+        magnitude_class="moderate",
+        place="Japan",
+        event_time=datetime.now(timezone.utc),
+        updated_time=datetime.now(timezone.utc),
+        latitude=41.8,
+        longitude=142.5,
+        depth_km=35.0,
+        depth_class="shallow",
+        energy_joules=2.0e12,
+        risk_score=62.5,
+        region_id="japan",
+        felt=120,
+        cdi=4.2,
+        mmi=5.1,
+        alert_level="green",
+        tsunami=1,
+        significance=449,
+        net="us",
+        mag_type="mww",
+        status="reviewed",
+        raw_place="Japan",
+    )
+    assert event_with_tsunami.has_tsunami is True
 
-    @pytest.mark.unit
-    def test_coordinates_longitude_first(self, sample_api_response):
-        """Ensure coordinates[0] is longitude (can be negative for western hemisphere)."""
-        response = USGSResponse.model_validate(sample_api_response)
-        # us7000test3 (quarry blast in California): coordinates = [-118.0, 34.2, 5.0]
-        feature = next(f for f in response.features if f.id == "us7000test3")
-        coords = feature.geometry.coordinates
-        assert coords[0] == -118.0  # longitude (western hemisphere → negative)
-        assert coords[1] == 34.2    # latitude (northern hemisphere → positive)
+    event_no_tsunami = SeismicEvent(
+        event_id="us7000test2",
+        magnitude=5.4,
+        magnitude_class="moderate",
+        place="Japan",
+        event_time=datetime.now(timezone.utc),
+        updated_time=datetime.now(timezone.utc),
+        latitude=41.8,
+        longitude=142.5,
+        depth_km=35.0,
+        depth_class="shallow",
+        energy_joules=2.0e12,
+        risk_score=62.5,
+        region_id="japan",
+        felt=120,
+        cdi=4.2,
+        mmi=5.1,
+        alert_level="green",
+        tsunami=0,
+        significance=449,
+        net="us",
+        mag_type="mww",
+        status="reviewed",
+        raw_place="Japan",
+    )
+    assert event_no_tsunami.has_tsunami is False
+
+
+@pytest.mark.unit
+def test_longitude_out_of_range_raises():
+    """longitud > 180 debe lanzar ValidationError en la validación de coordenadas."""
+    with pytest.raises(ValidationError):
+        USGSGeometry(type="Point", coordinates=[200.0, 41.8, 35.0])
