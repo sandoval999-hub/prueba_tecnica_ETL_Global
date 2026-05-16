@@ -26,3 +26,7 @@ numpy==1.26.2
 # ── Testing ───────────────────────────────────────────────────
 pytest==7.4.3
 pytest-cov==4.1.0
+
+# ── Orchestration ─────────────────────────────────────────────
+dagster
+dagster-webserver

@@ -18,6 +18,9 @@ help: ## Show this help
 daily: ## Run pipeline in daily mode (last 24h, all regions, mag ≥ 1.0)
 	python main.py --mode daily
 
+dagster: ## Start the Dagster UI (Phase 2 Orchestration)
+	dagster dev -m src.orchestration -p 3000
+
 alert: ## Run pipeline in alert mode (last 1h, global, mag ≥ 4.5)
 	python main.py --mode alert
 
