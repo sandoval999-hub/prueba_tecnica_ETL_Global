@@ -5,23 +5,24 @@ Responsibilities:
   - Call the USGS Earthquake Hazards API for each monitoring region
   - Handle retries with exponential backoff
   - Respect rate limits and honour Retry-After on HTTP 429
-  - Validate raw API responses with Pydantic v2 models
-  - Filter only events of type 'earthquake'
+  - Save raw API responses to local disk (data/raw/) to simulate a Data Lake Bronze layer
   - Segment long historical date ranges into ≤30-day blocks
   - Integrate with the CircuitBreaker to fail fast when the API is down
 """
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import requests
-from pydantic import ValidationError
 
 from src.logger_config import get_logger
-from src.models import RegionConfig, USGSFeature, USGSResponse
+from src.models import RegionConfig
 from src.utils import CircuitBreaker, CircuitBreakerOpen, RateLimiter, date_range_segments
 
 logger = get_logger("extractor")
@@ -30,13 +31,7 @@ logger = get_logger("extractor")
 class USGSExtractor:
     """
     Extracts seismic events from the USGS Earthquake Hazards Program API.
-
-    Parameters
-    ----------
-    cfg : dict
-        Full pipeline configuration (from config.yaml).
-    circuit_breaker : CircuitBreaker
-        Shared circuit breaker instance.
+    Writes raw JSON directly to disk.
     """
 
     def __init__(self, cfg: Dict[str, Any], circuit_breaker: CircuitBreaker) -> None:
@@ -52,6 +47,10 @@ class USGSExtractor:
         self.rate_limiter = RateLimiter(seconds=rate_secs)
         self.circuit_breaker = circuit_breaker
 
+        # Bronze layer local path
+        self.raw_data_dir = Path("data/raw/usgs")
+        self.raw_data_dir.mkdir(parents=True, exist_ok=True)
+
     # ─────────────────────────────────────────────────────────────────────────
     # Public extraction methods
     # ─────────────────────────────────────────────────────────────────────────
@@ -61,31 +60,32 @@ class USGSExtractor:
         regions: List[RegionConfig],
         lookback_hours: int = 24,
         min_magnitude: float = 1.0,
-    ) -> List[USGSFeature]:
+    ) -> List[str]:
         """Extract events from the last N hours for all (or one) regions."""
         now = datetime.now(timezone.utc)
         start = now - timedelta(hours=lookback_hours)
-        all_features: List[USGSFeature] = []
+        saved_files: List[str] = []
 
         for region in regions:
             logger.info("Daily extract | region=%s | last %dh | mag≥%.1f",
                         region.region_id, lookback_hours, min_magnitude)
-            features = self._fetch_region(
+            files = self._fetch_region(
                 region=region,
                 start=start,
                 end=now,
                 min_magnitude=min_magnitude,
+                mode="daily"
             )
-            all_features.extend(features)
+            saved_files.extend(files)
 
-        logger.info("Daily extract complete: %d total events", len(all_features))
-        return all_features
+        logger.info("Daily extract complete: %d total files saved", len(saved_files))
+        return saved_files
 
     def extract_alert(
         self,
         lookback_hours: int = 1,
         min_magnitude: float = 4.5,
-    ) -> List[USGSFeature]:
+    ) -> List[str]:
         """Extract global events from the last hour with mag ≥ 4.5 (no region filter)."""
         now = datetime.now(timezone.utc)
         start = now - timedelta(hours=lookback_hours)
@@ -98,9 +98,9 @@ class USGSExtractor:
             end=now,
             min_magnitude=min_magnitude,
         )
-        features = self._fetch_with_retry(params)
-        logger.info("Alert extract complete: %d events", len(features))
-        return features
+        files = self._fetch_with_retry(params, region_id="global", mode="alert")
+        logger.info("Alert extract complete: %d files saved", len(files))
+        return files
 
     def extract_historical(
         self,
@@ -108,12 +108,12 @@ class USGSExtractor:
         start_date: datetime,
         end_date: datetime,
         min_magnitude: float = 2.5,
-    ) -> List[USGSFeature]:
+    ) -> List[str]:
         """
         Extract historical data for a (possibly long) date range.
         Automatically segments into ≤30-day blocks to respect USGS limits.
         """
-        all_features: List[USGSFeature] = []
+        saved_files: List[str] = []
 
         for region in regions:
             logger.info(
@@ -137,18 +137,19 @@ class USGSExtractor:
                     "  Segment %s → %s for region %s",
                     seg_start, seg_end, region.region_id,
                 )
-                features = self._fetch_region(
+                files = self._fetch_region(
                     region=region,
                     start=seg_start_dt,
                     end=seg_end_dt,
                     min_magnitude=min_magnitude,
+                    mode="historical"
                 )
-                all_features.extend(features)
+                saved_files.extend(files)
                 # Rate limit between segments to avoid saturating USGS
                 self.rate_limiter.wait()
 
-        logger.info("Historical extract complete: %d total events", len(all_features))
-        return all_features
+        logger.info("Historical extract complete: %d total files saved", len(saved_files))
+        return saved_files
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal helpers
@@ -160,7 +161,8 @@ class USGSExtractor:
         start: datetime,
         end: datetime,
         min_magnitude: float,
-    ) -> List[USGSFeature]:
+        mode: str
+    ) -> List[str]:
         """Build params for a specific region bounding box and fetch."""
         params = self._build_params(
             start=start,
@@ -171,7 +173,7 @@ class USGSExtractor:
             min_lon=region.min_lon,
             max_lon=region.max_lon,
         )
-        return self._fetch_with_retry(params, region_id=region.region_id)
+        return self._fetch_with_retry(params, region_id=region.region_id, mode=mode)
 
     def _build_params(
         self,
@@ -204,14 +206,14 @@ class USGSExtractor:
     def _fetch_with_retry(
         self,
         params: Dict[str, Any],
-        region_id: str = "global",
-    ) -> List[USGSFeature]:
+        region_id: str,
+        mode: str
+    ) -> List[str]:
         """
         Execute an API request with retry + exponential backoff.
         Integrates with the circuit breaker and rate limiter.
-        Returns a list of validated USGSFeature objects (earthquakes only).
+        Saves raw JSON directly to disk. Returns a list containing the file path.
         """
-        # Check circuit before attempting anything
         self.circuit_breaker.check()
 
         last_exc: Optional[Exception] = None
@@ -246,41 +248,31 @@ class USGSExtractor:
 
                 response.raise_for_status()
 
-                # ── Parse & validate with Pydantic ───────────────────────────
+                # ── Save Raw JSON ───────────────────────────────────────────
                 raw = response.json()
-                try:
-                    usgs_response = USGSResponse.model_validate(raw)
-                except ValidationError as ve:
-                    logger.error(
-                        "Pydantic validation failed for region=%s: %s",
-                        region_id, ve,
-                    )
-                    # Schema changed — fail immediately (do not retry)
-                    raise
-
-                total = usgs_response.metadata.count or len(usgs_response.features)
+                total = raw.get("metadata", {}).get("count") or len(raw.get("features", []))
+                
                 logger.info(
                     "region=%s | status=%d | events=%d | time=%dms",
                     region_id, response.status_code, total, elapsed_ms,
                 )
 
-                # Filter only earthquake type events
-                earthquakes = [
-                    f for f in usgs_response.features
-                    if (f.properties.type or "").lower() == "earthquake"
-                ]
-                non_quake = total - len(earthquakes)
-                if non_quake:
-                    logger.debug(
-                        "Filtered %d non-earthquake events for region=%s",
-                        non_quake, region_id,
-                    )
+                now = datetime.now(timezone.utc)
+                # s3://datalake/bronze/usgs_seismic/year=2024/month=05/day=16/
+                out_dir = self.raw_data_dir / mode / f"year={now.year}" / f"month={now.month:02d}" / f"day={now.day:02d}"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                
+                filename = f"{region_id}_{int(now.timestamp())}_{total}.json"
+                file_path = out_dir / filename
+                
+                with open(file_path, "w", encoding="utf-8") as f:
+                    json.dump(raw, f, separators=(',', ':'))
+
+                logger.debug("Raw data saved to %s", file_path)
 
                 self.circuit_breaker.record_success()
-                return earthquakes
+                return [str(file_path)]
 
-            except ValidationError:
-                raise  # do not retry Pydantic failures
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
                 logger.warning(
@@ -289,7 +281,6 @@ class USGSExtractor:
                 )
                 last_exc = exc
                 self.circuit_breaker.record_failure()
-                # Check if circuit opened after this failure
                 if self.circuit_breaker.state == "open":
                     raise CircuitBreakerOpen(
                         f"Circuit breaker OPEN after failure on region={region_id}"
@@ -315,7 +306,6 @@ class USGSExtractor:
                         f"Circuit breaker OPEN after unexpected error on region={region_id}"
                     )
 
-            # Exponential backoff before next attempt
             if attempt < self.max_retries:
                 backoff = self.retry_backoff * (2 ** (attempt - 1))
                 logger.info("Backoff: waiting %.1fs before attempt %d", backoff, attempt + 1)

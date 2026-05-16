@@ -205,48 +205,35 @@ class RateLimiter:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# MySQL Advisory Lock context manager
+# File Lock context manager (Decoupled from Database)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class MySQLAdvisoryLock:
+class FileLock:
     """
-    Acquire a MySQL advisory lock to prevent parallel pipeline instances.
+    Acquire a local file lock to prevent parallel pipeline instances.
 
     Usage:
-        with MySQLAdvisoryLock(engine, "seismic_etl_pipeline") as lock:
+        with FileLock("logs/pipeline.lock") as lock:
             run_pipeline()
     """
 
-    LOCK_NAME = "seismic_etl_pipeline"
+    def __init__(self, lock_file: str = "logs/pipeline.lock") -> None:
+        self.lock_file = Path(lock_file)
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
 
-    def __init__(self, engine: Any, lock_name: str = LOCK_NAME) -> None:
-        self.engine = engine
-        self.lock_name = lock_name
-        self._conn: Any = None
-
-    def __enter__(self) -> "MySQLAdvisoryLock":
-
-        self._conn = self.engine.connect()
-        result = self._conn.execute(
-            text(f"SELECT GET_LOCK('{self.lock_name}', 0) AS got_lock")
-        ).fetchone()
-        got_lock = result[0] if result else 0
-        if not got_lock:
-            self._conn.close()
+    def __enter__(self) -> "FileLock":
+        if self.lock_file.exists():
             raise RuntimeError(
-                "Pipeline ya en ejecución. Abortando para evitar race conditions."
+                f"Pipeline ya en ejecución. Lockfile existe: {self.lock_file}"
             )
-        logger.info("Advisory lock '%s' acquired", self.lock_name)
+        self.lock_file.touch()
+        logger.info("File lock '%s' acquired", self.lock_file)
         return self
 
     def __exit__(self, *_: Any) -> None:
-
-        if self._conn:
-            try:
-                self._conn.execute(text(f"SELECT RELEASE_LOCK('{self.lock_name}')"))
-                logger.info("Advisory lock '%s' released", self.lock_name)
-            finally:
-                self._conn.close()
+        if self.lock_file.exists():
+            self.lock_file.unlink()
+            logger.info("File lock '%s' released", self.lock_file)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

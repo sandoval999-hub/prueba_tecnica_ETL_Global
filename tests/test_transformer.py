@@ -267,114 +267,112 @@ class TestMsToUtc:
 
 class TestSeismicTransformer:
     @pytest.mark.unit
-    def test_transforms_valid_events(self, sample_cfg, all_regions, earthquake_features):
+    def test_transforms_valid_events(self, sample_cfg, all_regions, raw_json_files):
         """Valid earthquakes should be transformed successfully."""
         transformer = SeismicTransformer(sample_cfg, all_regions)
-        events, quality, quarantine = transformer.transform(earthquake_features, "daily")
+        events, quality, quarantine = transformer.transform(raw_json_files, "daily")
 
         # 4 earthquakes from fixture: test1, test2, test4 valid + test5 deleted → 3 valid
         assert len(events) == 3
         assert len(quarantine) == 0
 
     @pytest.mark.unit
-    def test_transform_discards_deleted_status(self, sample_cfg, all_regions, earthquake_features):
+    def test_transform_discards_deleted_status(self, sample_cfg, all_regions, raw_json_files):
         """Events with status='deleted' should be discarded with quality entry."""
         transformer = SeismicTransformer(sample_cfg, all_regions)
-        events, quality, _ = transformer.transform(earthquake_features, "daily")
+        events, quality, _ = transformer.transform(raw_json_files, "daily")
 
         # us7000test5 has status=deleted → discarded
         deleted_entries = [e for e in quality if "deleted" in e["motivo_rechazo"]]
         assert len(deleted_entries) == 1
 
     @pytest.mark.unit
-    def test_transform_discards_quarry_blast(self, sample_cfg, all_regions, sample_usgs_features):
-        """Quarry blast events should NOT appear in output (filtered in extractor).
+    def test_transform_discards_quarry_blast(self, sample_cfg, all_regions, raw_json_files):
+        """Quarry blast events should NOT appear in output (filtered in transform)."""
+        transformer = SeismicTransformer(sample_cfg, all_regions)
+        events, quality, quarantine = transformer.transform(raw_json_files, "daily")
         
-        Note: The extractor filters non-earthquake types before transform.
-        This test validates that if quarry blasts somehow reach transform,
-        only earthquake-type features are processed.
-        """
-        # earthquake_features already filters quarry blasts in conftest
-        eq_only = [f for f in sample_usgs_features if (f.properties.type or "").lower() == "earthquake"]
-        non_eq = [f for f in sample_usgs_features if (f.properties.type or "").lower() != "earthquake"]
-        assert len(non_eq) == 1  # quarry blast exists in fixture
+        # Verify no event is a quarry blast
+        for e in events:
+            assert e.event_id != "nc74034441"  # the ID of the quarry blast in the sample
+        
+        # We don't even add quarry blasts to quality log anymore, we filter them at reading time
+        assert not any("quarry blast" in q.get("motivo_rechazo", "") for q in quality)
 
     @pytest.mark.unit
-    def test_transform_discards_null_magnitude(self, sample_cfg, all_regions):
+    def test_transform_discards_null_magnitude(self, sample_cfg, all_regions, raw_json_files, tmp_path):
         """Events with mag=None should be discarded."""
-        from src.models import USGSFeature, USGSGeometry, USGSProperties
-        
-        null_mag_feature = USGSFeature(
-            type="Feature",
-            properties=USGSProperties(
-                mag=None, place="Test", time=1714480000000, type="earthquake", status="reviewed",
-            ),
-            geometry=USGSGeometry(type="Point", coordinates=[142.5, 41.8, 35.0]),
-            id="null_mag_event",
-        )
-        
+        import json
+        # Read the raw file, set mag to None, rewrite
+        with open(raw_json_files[0], "r") as f:
+            data = json.load(f)
+        data["features"][0]["properties"]["mag"] = None
+        new_file = tmp_path / "null_mag.json"
+        with open(new_file, "w") as f:
+            json.dump(data, f)
+
         transformer = SeismicTransformer(sample_cfg, all_regions)
-        events, quality, _ = transformer.transform([null_mag_feature], "daily")
-        assert len(events) == 0
+        events, quality, _ = transformer.transform([str(new_file)], "daily")
+        assert len(events) == 2  # The sample originally had 3 valid, mutating one leaves 2
         assert any("magnitude" in e["motivo_rechazo"] for e in quality)
 
     @pytest.mark.unit
-    def test_deduplication(self, sample_cfg, all_regions, earthquake_features):
+    def test_deduplication(self, sample_cfg, all_regions, raw_json_files):
         """Duplicate event_ids in the same run should keep only the first."""
-        doubled = earthquake_features + earthquake_features
+        doubled = raw_json_files + raw_json_files
         transformer = SeismicTransformer(sample_cfg, all_regions)
         events, quality, _ = transformer.transform(doubled, "daily")
 
-        events_orig, _, _ = transformer.transform(earthquake_features, "daily")
+        events_orig, _, _ = transformer.transform(raw_json_files, "daily")
         assert len(events) == len(events_orig)
 
         dup_entries = [e for e in quality if "duplicate" in e["motivo_rechazo"]]
-        assert len(dup_entries) == len(earthquake_features)
+        assert len(dup_entries) == 4  # All 4 earthquake features in the second file are duplicates
 
     @pytest.mark.unit
-    def test_region_assignment(self, sample_cfg, all_regions, earthquake_features):
-        """Events should be assigned to the correct monitoring region."""
+    def test_region_assignment(self, sample_cfg, all_regions, raw_json_files):
+        """Ensure assign_region works during transform."""
         transformer = SeismicTransformer(sample_cfg, all_regions)
-        events, _, _ = transformer.transform(earthquake_features, "daily")
+        events, _, _ = transformer.transform(raw_json_files, "daily")
 
         regions = {e.region_id for e in events}
         assert "japan" in regions  # test1 and test2
 
     @pytest.mark.unit
-    def test_risk_score_in_range(self, sample_cfg, all_regions, earthquake_features):
+    def test_risk_score_in_range(self, sample_cfg, all_regions, raw_json_files):
         """All transformed events should have risk_score in [0, 100]."""
         transformer = SeismicTransformer(sample_cfg, all_regions)
-        events, _, _ = transformer.transform(earthquake_features, "daily")
+        events, _, _ = transformer.transform(raw_json_files, "daily")
         for ev in events:
             assert 0.0 <= ev.risk_score <= 100.0
 
     @pytest.mark.unit
-    def test_tsunami_flag(self, sample_cfg, all_regions, earthquake_features):
-        """Events with tsunami=1 in the API should have tsunami=1 in SeismicEvent."""
+    def test_tsunami_flag(self, sample_cfg, all_regions, raw_json_files):
+        """Ensure the boolean-like tsunami integer is captured correctly."""
         transformer = SeismicTransformer(sample_cfg, all_regions)
-        events, _, _ = transformer.transform(earthquake_features, "daily")
+        events, _, _ = transformer.transform(raw_json_files, "daily")
         tsunami_events = [e for e in events if e.tsunami == 1]
         assert len(tsunami_events) >= 1  # test2 and test4 have tsunami=1
 
     @pytest.mark.unit
-    def test_magnitude_class_assigned(self, sample_cfg, all_regions, earthquake_features):
+    def test_magnitude_class_assigned(self, sample_cfg, all_regions, raw_json_files):
         """Every transformed event must have a valid magnitude_class."""
         transformer = SeismicTransformer(sample_cfg, all_regions)
-        events, _, _ = transformer.transform(earthquake_features, "alert")
+        events, _, _ = transformer.transform(raw_json_files, "alert")
         for ev in events:
             assert ev.magnitude_class in {
                 "micro", "minor", "light", "moderate", "strong", "major", "great"
             }
 
     @pytest.mark.unit
-    def test_coordinates_order(self, sample_cfg, all_regions, earthquake_features):
+    def test_coordinates_order(self, sample_cfg, all_regions, raw_json_files):
         """Verify longitude = coordinates[0], latitude = coordinates[1].
         
         This is the most common bug in geospatial ETL: confusing lat/lon order.
         USGS uses [longitude, latitude, depth] (GeoJSON standard).
         """
         transformer = SeismicTransformer(sample_cfg, all_regions)
-        events, _, _ = transformer.transform(earthquake_features, "daily")
+        events, _, _ = transformer.transform(raw_json_files, "daily")
 
         # us7000test1: coordinates = [142.5, 41.8, 35.0]
         test1 = next(e for e in events if e.event_id == "us7000test1")

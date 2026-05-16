@@ -143,6 +143,14 @@ def sample_api_response() -> Dict[str, Any]:
     with open(response_path, "r", encoding="utf-8") as fh:
         return json.load(fh)
 
+@pytest.fixture
+def raw_json_files(sample_api_response, tmp_path) -> List[str]:
+    """Save the sample_api_response to a temp file and return its path."""
+    file_path = tmp_path / "sample_raw.json"
+    with open(file_path, "w", encoding="utf-8") as fh:
+        json.dump(sample_api_response, fh)
+    return [str(file_path)]
+
 
 @pytest.fixture
 def sample_usgs_features(sample_api_response):

@@ -174,15 +174,15 @@ class SeismicTransformer:
 
     def transform(
         self,
-        features: List[USGSFeature],
+        file_paths: List[str],
         pipeline_mode: str = "daily",
     ) -> Tuple[List[SeismicEvent], List[Dict[str, Any]], List[QuarantineRecord]]:
         """
-        Transform a list of USGSFeature into (events, quality_log_entries, quarantine_records).
+        Transform a list of raw JSON file paths into (events, quality_log_entries, quarantine_records).
 
         Parameters
         ----------
-        features       : Raw extracted features (already filtered for type=earthquake)
+        file_paths     : Raw extracted JSON file paths
         pipeline_mode  : 'daily' | 'alert' | 'historical'
 
         Returns
@@ -191,41 +191,62 @@ class SeismicTransformer:
         quality_entries : List of dicts for log_calidad_datos (discarded records)
         quarantine      : List of QuarantineRecord (transformation errors)
         """
+        from pydantic import ValidationError
+        from src.models import USGSResponse
+
         self.pipeline_mode = pipeline_mode
         seen_ids: set = set()
         events: List[SeismicEvent] = []
         quality_entries: List[Dict[str, Any]] = []
         quarantine_records: List[QuarantineRecord] = []
 
-        for feature in features:
-            event_id = feature.id
-
-            # ── Deduplication ────────────────────────────────────────────────
-            if event_id in seen_ids:
-                logger.debug("Duplicate event %s — skipping", event_id)
-                quality_entries.append(self._quality_entry(event_id, "duplicate"))
-                continue
-            seen_ids.add(event_id)
-
-            # ── Try to transform; quarantine on unexpected errors ─────────────
+        for file_path in file_paths:
             try:
-                result = self._transform_one(feature, quality_entries)
-                if result is not None:
-                    events.append(result)
+                with open(file_path, "r", encoding="utf-8") as f:
+                    raw_data = json.load(f)
+                
+                # Parse with Pydantic (data contract)
+                usgs_response = USGSResponse.model_validate(raw_data)
+                
+                # Filter earthquake events
+                features = [
+                    f for f in usgs_response.features
+                    if (f.properties.type or "").lower() == "earthquake"
+                ]
+
+                for feature in features:
+                    event_id = feature.id
+
+                    # ── Deduplication ────────────────────────────────────────────────
+                    if event_id in seen_ids:
+                        logger.debug("Duplicate event %s — skipping", event_id)
+                        quality_entries.append(self._quality_entry(event_id, "duplicate"))
+                        continue
+                    seen_ids.add(event_id)
+
+                    # ── Try to transform; quarantine on unexpected errors ─────────────
+                    try:
+                        result = self._transform_one(feature, quality_entries)
+                        if result is not None:
+                            events.append(result)
+                    except Exception as exc:
+                        logger.error(
+                            "Unexpected error transforming event %s: %s. Sending to quarantine.",
+                            event_id, exc,
+                        )
+                        quarantine_records.append(
+                            QuarantineRecord(
+                                event_id=event_id,
+                                raw_json=json.dumps(feature.model_dump(), default=str),
+                                rejection_reason=f"{type(exc).__name__}: {exc}",
+                                attempts=1,
+                                pipeline_mode=pipeline_mode,
+                            )
+                        )
+            except ValidationError as ve:
+                logger.error("Data contract validation failed for file %s: %s", file_path, ve)
             except Exception as exc:
-                logger.error(
-                    "Unexpected error transforming event %s: %s. Sending to quarantine.",
-                    event_id, exc,
-                )
-                quarantine_records.append(
-                    QuarantineRecord(
-                        event_id=event_id,
-                        raw_json=json.dumps(feature.model_dump(), default=str),
-                        rejection_reason=f"{type(exc).__name__}: {exc}",
-                        attempts=1,
-                        pipeline_mode=pipeline_mode,
-                    )
-                )
+                logger.error("Failed to read or process file %s: %s", file_path, exc)
 
         logger.info(
             "Transform complete | mode=%s | valid=%d | discarded=%d | quarantined=%d",

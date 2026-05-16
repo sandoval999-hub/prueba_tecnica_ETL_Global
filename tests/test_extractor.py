@@ -61,14 +61,14 @@ class TestUSGSExtractorInit:
 
 class TestExtractAlert:
     @pytest.mark.unit
-    def test_returns_earthquake_features(self, extractor, sample_api_response):
+    def test_saves_raw_json(self, extractor, sample_api_response):
+        """extract_alert should save raw json to disk and return the file paths."""
         mock_resp = _make_mock_response(200, sample_api_response)
         with patch("requests.get", return_value=mock_resp):
-            features = extractor.extract_alert()
-        # sample has 4 earthquakes (incl. 1 deleted) + 1 quarry blast → 4 returned
-        assert len(features) == 4
-        for f in features:
-            assert f.properties.type == "earthquake"
+            file_paths = extractor.extract_alert()
+        # 1 API call -> 1 file saved
+        assert len(file_paths) == 1
+        assert Path(file_paths[0]).exists()
 
     @pytest.mark.unit
     def test_circuit_breaker_records_success(self, extractor, circuit_breaker, sample_api_response):

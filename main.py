@@ -22,7 +22,7 @@ from src.models import PipelineRun, RegionConfig
 from src.utils import (
     CircuitBreaker,
     CircuitBreakerOpen,
-    MySQLAdvisoryLock,
+    FileLock,
     get_db_url,
     load_config,
 )
@@ -186,33 +186,33 @@ def run_pipeline(args: argparse.Namespace) -> int:
 
     # ── Extract ───────────────────────────────────────────────────────────────
     logger.info("--- EXTRACT ---")
-    raw_features = []
+    file_paths = []
 
     if args.mode == "daily":
-        raw_features = extractor.extract_daily(
+        file_paths = extractor.extract_daily(
             regions=regions,
             lookback_hours=int(pipeline_cfg.get("daily_lookback_hours", 24)),
             min_magnitude=float(pipeline_cfg.get("daily_min_magnitude", 1.0)),
         )
     elif args.mode == "alert":
-        raw_features = extractor.extract_alert(
+        file_paths = extractor.extract_alert(
             lookback_hours=int(pipeline_cfg.get("alert_lookback_hours", 1)),
             min_magnitude=float(pipeline_cfg.get("alert_min_magnitude", 4.5)),
         )
     elif args.mode == "historical":
-        raw_features = extractor.extract_historical(
+        file_paths = extractor.extract_historical(
             regions=regions,
             start_date=start_dt,
             end_date=end_dt,
             min_magnitude=float(pipeline_cfg.get("historical_min_magnitude", 2.5)),
         )
 
-    logger.info("Extract phase complete | %d raw features", len(raw_features))
+    logger.info("Extract phase complete | %d files saved", len(file_paths))
 
     # ── Transform ─────────────────────────────────────────────────────────────
     logger.info("--- TRANSFORM ---")
     events, quality_entries, quarantine_records = transformer.transform(
-        raw_features, pipeline_mode=args.mode
+        file_paths, pipeline_mode=args.mode
     )
     logger.info(
         "Transform complete | valid=%d discarded=%d quarantined=%d",
@@ -237,7 +237,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         end_time=None,
         status="running",
         regions_processed=len(regions),
-        events_extracted=len(raw_features),
+        events_extracted=len(file_paths),  # We track file count here instead of raw JSON features
         events_loaded=0,
         events_discarded=len(quality_entries),
         events_quarantined=len(quarantine_records),
@@ -249,8 +249,8 @@ def run_pipeline(args: argparse.Namespace) -> int:
     run_id: Optional[int] = None
 
     try:
-        # Advisory lock ensures only one pipeline instance runs at a time
-        with MySQLAdvisoryLock(loader.engine) as _lock:
+        # File lock ensures only one pipeline instance runs at a time
+        with FileLock("logs/pipeline.lock") as _lock:
             run_id = loader.log_run_start(run)
             loaded = loader.load_events(events, run_id=run_id)
             loader.load_quality_entries(quality_entries, run_id, args.mode)
@@ -274,7 +274,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         )
 
     except RuntimeError as exc:
-        # Advisory lock not available
+        # Lock not available
         logger.error(str(exc))
         return 1
 
