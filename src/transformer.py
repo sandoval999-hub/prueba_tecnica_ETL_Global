@@ -127,7 +127,7 @@ def calculate_risk_score(
         + sig_norm * 0.20
         + pop_proxy * 0.15
     )
-    return round(min(max(score, 0.0), 100.0), 4)
+    return round(min(max(score, 0.0), 100.0), 2)
 
 
 def assign_region(

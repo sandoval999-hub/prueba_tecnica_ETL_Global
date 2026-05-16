@@ -65,8 +65,8 @@ class TestExtractAlert:
         mock_resp = _make_mock_response(200, sample_api_response)
         with patch("requests.get", return_value=mock_resp):
             features = extractor.extract_alert()
-        # sample has 3 earthquakes + 1 quarry blast → only 3 returned
-        assert len(features) == 3
+        # sample has 4 earthquakes (incl. 1 deleted) + 1 quarry blast → 4 returned
+        assert len(features) == 4
         for f in features:
             assert f.properties.type == "earthquake"
 

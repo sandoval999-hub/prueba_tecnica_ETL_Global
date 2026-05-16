@@ -154,6 +154,23 @@ class QuarantineRecord:
 
 
 @dataclass
+class QualityEntry:
+    """Record for events discarded during quality validation (written to log_calidad_datos).
+
+    Attributes:
+        event_id: USGS event identifier.
+        motivo_rechazo: Reason the event was discarded.
+        pipeline_mode: Pipeline mode when event was discarded (daily|alert|historical).
+        created_at: Timestamp of the quality entry creation.
+    """
+
+    event_id: str
+    motivo_rechazo: str
+    pipeline_mode: str
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
 class PipelineRun:
     """Metadata for a single pipeline execution (written to log_ejecuciones)."""
 

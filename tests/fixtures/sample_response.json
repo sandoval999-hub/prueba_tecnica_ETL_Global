@@ -6,7 +6,7 @@
     "title": "USGS Earthquakes",
     "status": 200,
     "api": "1.14.0",
-    "count": 4
+    "count": 5
   },
   "features": [
     {
@@ -51,10 +51,10 @@
         "tz": null,
         "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us7000test2",
         "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us7000test2",
-        "felt": 5000,
-        "cdi": 7.8,
-        "mmi": 8.2,
-        "alert": "red",
+        "felt": null,
+        "cdi": null,
+        "mmi": null,
+        "alert": null,
         "status": "reviewed",
         "tsunami": 1,
         "sig": 950,
@@ -136,6 +136,38 @@
         "coordinates": [99.0, -3.5, 25.0]
       },
       "id": "us7000test4"
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 4.1,
+        "place": "Near the coast of Honshu, Japan",
+        "time": 1714100000000,
+        "updated": 1714110000000,
+        "tz": null,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us7000test5",
+        "detail": "",
+        "felt": 30,
+        "cdi": 3.0,
+        "mmi": 3.5,
+        "alert": "green",
+        "status": "deleted",
+        "tsunami": 0,
+        "sig": 259,
+        "net": "us",
+        "code": "7000test5",
+        "nst": 45,
+        "dmin": 0.5,
+        "rms": 0.4,
+        "gap": 40,
+        "magType": "mb",
+        "type": "earthquake"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [140.5, 38.3, 55.0]
+      },
+      "id": "us7000test5"
     }
   ],
   "bbox": [-180.0, -90.0, 0.0, 180.0, 90.0, 700.0]
