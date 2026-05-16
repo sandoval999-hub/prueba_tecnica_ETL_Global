@@ -1,0 +1,56 @@
+version: "3.9"
+
+services:
+
+  # ─── MySQL 8.0 ──────────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-seismic
+    environment:
+      MYSQL_ROOT_PASSWORD: atlas2025
+      MYSQL_DATABASE: seismic_db
+      MYSQL_ROOT_HOST: "%"
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql/migrations/V1__init_schema.sql:/docker-entrypoint-initdb.d/01_V1__init_schema.sql:ro
+      - ./sql/migrations/V2__add_quarantine_table.sql:/docker-entrypoint-initdb.d/02_V2__add_quarantine_table.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-patlas2025"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - seismic-net
+
+  # ─── ETL Pipeline ───────────────────────────────────────────────────────────
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seismic-etl
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: seismic_db
+      DB_USER: root
+      DB_PASSWORD: atlas2025
+    volumes:
+      - ./logs:/app/logs
+      - ./output:/app/output
+    command: ["python", "main.py", "--mode", "daily"]
+    networks:
+      - seismic-net
+    restart: "no"
+
+volumes:
+  mysql_data:
+
+networks:
+  seismic-net:
+    driver: bridge

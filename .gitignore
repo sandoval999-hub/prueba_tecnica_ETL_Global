@@ -1,0 +1,53 @@
+# ===========================================================
+# .gitignore — Atlas RA Seismic ETL Pipeline
+# ===========================================================
+
+# ── Secrets / credentials ──────────────────────────────────
+.env
+config/.env
+*.env.local
+
+# ── Python ─────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ── Virtual environments ──────────────────────────────────
+venv/
+.venv/
+env/
+
+# ── Testing ────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ── Type checking / linting ────────────────────────────────
+.mypy_cache/
+.ruff_cache/
+
+# ── IDE ────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ── Pipeline runtime artifacts ─────────────────────────────
+logs/*.log
+logs/*.log.*
+logs/circuit_breaker_state.json
+output/*.md
+output/charts/*.png
+
+# ── Keep the directories (git needs at least one file) ─────
+!logs/.gitkeep
+!output/.gitkeep
+!output/charts/.gitkeep

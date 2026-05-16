@@ -1,0 +1,127 @@
+# ============================================================
+# Seismic ETL Pipeline — Atlas Reinsurance Analytics
+# Configuration file (no secrets here — see .env.example)
+# ============================================================
+
+api:
+  base_url: "https://earthquake.usgs.gov/fdsnws/event/1/query"
+  rate_limit_seconds: 1.0          # Sleep between consecutive API requests
+  request_timeout_seconds: 30      # HTTP request timeout
+  max_retries: 3                   # Max retry attempts on 5xx / timeout
+  retry_backoff_seconds: 2         # Initial backoff; doubles each retry (2 → 4 → 8)
+  max_segment_days: 30             # Max days per API segment in historical mode
+  result_limit: 20000              # USGS max results per request
+
+circuit_breaker:
+  failure_threshold: 3             # Consecutive failures before opening the circuit
+  state_file: "logs/circuit_breaker_state.json"
+
+pipeline:
+  batch_size: 200                  # Records per INSERT batch
+  daily_lookback_hours: 24         # Hours to look back in daily mode
+  alert_lookback_hours: 1          # Hours to look back in alert mode
+  daily_min_magnitude: 1.0
+  alert_min_magnitude: 4.5
+  historical_min_magnitude: 2.5
+
+database:
+  pool_size: 5                     # SQLAlchemy connection pool size
+  max_overflow: 10                 # Extra connections above pool_size
+  pool_timeout: 30                 # Seconds to wait for a connection from the pool
+  pool_recycle: 3600               # Recycle connections after N seconds (avoids stale conn in MySQL)
+
+logging:
+  level: "INFO"
+  log_dir: "logs"
+  log_file: "pipeline.log"
+  max_bytes: 10485760              # 10 MB per log file
+  backup_count: 5
+
+output:
+  report_dir: "output"
+  charts_dir: "output/charts"
+
+# ============================================================
+# Monitoring regions — 8 seismic zones
+# ============================================================
+regions:
+  pacific_northwest:
+    display_name: "Pacífico Noroeste (EE.UU.)"
+    min_lat: 41.0
+    max_lat: 49.0
+    min_lon: -130.0
+    max_lon: -116.0
+
+  california:
+    display_name: "California"
+    min_lat: 32.0
+    max_lat: 42.0
+    min_lon: -125.0
+    max_lon: -114.0
+
+  japan:
+    display_name: "Japón"
+    min_lat: 30.0
+    max_lat: 46.0
+    min_lon: 128.0
+    max_lon: 146.0
+
+  indonesia:
+    display_name: "Indonesia"
+    min_lat: -11.0
+    max_lat: 6.0
+    min_lon: 95.0
+    max_lon: 141.0
+
+  south_america_west:
+    display_name: "Chile – Perú"
+    min_lat: -56.0
+    max_lat: -5.0
+    min_lon: -82.0
+    max_lon: -66.0
+
+  mediterranean:
+    display_name: "Mediterráneo (Turquía – Grecia – Italia)"
+    min_lat: 34.0
+    max_lat: 45.0
+    min_lon: 10.0
+    max_lon: 45.0
+
+  himalaya:
+    display_name: "Himalaya (Nepal – India)"
+    min_lat: 24.0
+    max_lat: 36.0
+    min_lon: 72.0
+    max_lon: 96.0
+
+  new_zealand:
+    display_name: "Nueva Zelanda"
+    min_lat: -50.0
+    max_lat: -34.0
+    min_lon: 165.0
+    max_lon: 180.0
+
+# ============================================================
+# Magnitude classification thresholds (Richter scale)
+# ============================================================
+magnitude_classes:
+  micro:    { max: 2.0,  description: "Generalmente no sentido" }
+  minor:    { min: 2.0,  max: 4.0,  description: "Sentido levemente" }
+  light:    { min: 4.0,  max: 5.0,  description: "Daños menores posibles" }
+  moderate: { min: 5.0,  max: 6.0,  description: "Daños a estructuras débiles" }
+  strong:   { min: 6.0,  max: 7.0,  description: "Daños significativos" }
+  major:    { min: 7.0,  max: 8.0,  description: "Daños graves en área amplia" }
+  great:    { min: 8.0,  description: "Devastador, potencialmente global" }
+
+# ============================================================
+# Risk score weights (proprietary Atlas RA formula)
+# ============================================================
+risk_score:
+  magnitude_weight: 0.40
+  depth_weight: 0.25
+  significance_weight: 0.20
+  population_weight: 0.15
+  max_depth_km: 700
+  max_significance: 1000
+  max_felt_reports: 100
+  high_risk_threshold: 70          # Used in reports

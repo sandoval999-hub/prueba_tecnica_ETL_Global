@@ -1,0 +1,28 @@
+# Atlas RA Seismic ETL Pipeline — Python Dependencies
+# Pin versions for reproducible builds
+
+# ── HTTP client ───────────────────────────────────────────────
+requests==2.31.0
+urllib3==2.1.0
+
+# ── Data processing ───────────────────────────────────────────
+pandas==2.1.4
+
+# ── Validation ────────────────────────────────────────────────
+pydantic>=2.5.0,<3.0.0
+
+# ── Database ──────────────────────────────────────────────────
+SQLAlchemy==2.0.23
+PyMySQL==1.1.0
+
+# ── Configuration / secrets ───────────────────────────────────
+pyyaml==6.0.1
+python-dotenv==1.0.0
+
+# ── Visualisation (optional, pipeline works without it) ───────
+matplotlib==3.8.2
+numpy==1.26.2
+
+# ── Testing ───────────────────────────────────────────────────
+pytest==7.4.3
+pytest-cov==4.1.0
