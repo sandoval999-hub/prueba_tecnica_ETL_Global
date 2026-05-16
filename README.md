@@ -55,36 +55,36 @@ Este pipeline ETL reemplaza un proceso manual basado en PDFs semanales con un si
 
 ---
 
-## 🏗️ Arquitectura
+## 🏗️ Arquitectura Lakehouse (Medallion)
+
+El pipeline implementa una arquitectura moderna de datos (Medallion Architecture) orquestada completamente mediante **Dagster (Software-Defined Assets)**.
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   USGS API      │────▷│   EXTRACT        │────▷│   TRANSFORM     │
-│   (GeoJSON)     │     │   extractor.py   │     │   transformer.py│
+│   USGS API      │────▷│   BRONZE LAYER   │────▷│   SILVER LAYER  │
+│   (GeoJSON)     │     │   (Raw JSON)     │     │   (Transformed) │
 │                 │     │                  │     │                 │
-│  • 8 regions    │     │  • Retry 3x      │     │  • Classify mag │
-│  • Real-time    │     │  • Rate limit    │     │  • Risk score   │
-│  • Historical   │     │  • Circuit break │     │  • Deduplicate  │
-└─────────────────┘     │  • Pydantic v2   │     │  • Quarantine   │
-                        └──────────────────┘     └───────┬─────────┘
+│  • 8 regions    │     │  • Immutable     │     │  • Data Contract│
+│  • Real-time    │     │  • Data Lake     │     │  • Risk score   │
+│  • Historical   │     │  • S3 / Local fs │     │  • Deduplicate  │
+└─────────────────┘     └──────────────────┘     └───────┬─────────┘
                                                          │
                         ┌──────────────────┐     ┌───────▽─────────┐
-                        │   MySQL 8.0      │◁────│   LOAD          │
-                        │                  │     │   loader.py     │
-                        │  • 7 tables      │     │                 │
-                        │  • UPSERT        │     │  • Batch 200    │
-                        │  • Advisory lock │     │  • Transactions │
-                        │  • Connection    │     │  • Pool SQLAlch │
-                        │    pool          │     │  • Advisory lock│
+                        │   GOLD LAYER     │◁────│   DAGSTER       │
+                        │   (MySQL 8.0)    │     │   (Orchestrator)│
+                        │                  │     │                 │
+                        │  • Aggregates    │     │  • Assets       │
+                        │  • Reports       │     │  • Lineage      │
+                        │  • Data Quality  │     │                 │
                         └──────────────────┘     └─────────────────┘
 ```
 
-### Flujo de datos
+### Flujo de datos Orquestado
 
-1. **Extract** → Llama a la API del USGS para cada región, valida con Pydantic v2, filtra solo `earthquake`
-2. **Transform** → Convierte timestamps, clasifica magnitud/profundidad, calcula energía y risk_score, deduplica
-3. **Load** → UPSERT en batches de 200 con transacciones explícitas, recalcula estadísticas diarias
-4. **Report** → Genera reporte Markdown y gráficos matplotlib
+1. **`raw_usgs_events` (Bronze)** → Descarga datos desde la API y los guarda inmutablemente en disco (`data/raw/usgs/`).
+2. **`transformed_events` (Silver)** → Lee los JSON, valida contra el *Data Contract* (Pydantic), calcula el *risk_score* y rechaza datos anómalos.
+3. **`loaded_events` (Gold)** → Inserta los eventos validados en MySQL (`seismic_events`, `data_quality_log`, `quarantine_records`) de forma idempotente (UPSERT).
+4. **`daily_aggregations` (Gold)** → Recalcula las agregaciones diarias para analítica rápida.
 
 ---
 
@@ -210,21 +210,21 @@ erDiagram
 
 ## 🚀 Instalación y Setup
 
-### Opción 1: Docker (recomendada)
+### Opción 1: Docker (Recomendada con Dagster UI)
 
 ```bash
 # Clonar el repositorio
 git clone https://github.com/tu-usuario/seismic-etl-pipeline.git
 cd seismic-etl-pipeline
 
-# Levantar MySQL + ejecutar pipeline
+# Levantar MySQL + Dagster UI (Puerto 3000)
 docker-compose up -d
 
 # Verificar que MySQL está listo
 docker exec -it mysql-seismic mysql -u root -patlas2025 -e "SHOW DATABASES;"
 
-# Ejecutar el pipeline
-docker-compose run pipeline python main.py --mode alert --verbose
+# Entra a tu navegador para ver el orquestador:
+http://localhost:3000
 ```
 
 ### Opción 2: Instalación local

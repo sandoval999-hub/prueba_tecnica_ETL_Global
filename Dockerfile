@@ -23,5 +23,12 @@ COPY . .
 # Create runtime directories
 RUN mkdir -p logs output/charts
 
-# Default command (overridden by docker-compose)
-CMD ["python", "main.py", "--mode", "daily"]
+# Expose Dagster UI port
+EXPOSE 3000
+
+# Set environment variables for Dagster
+ENV DAGSTER_HOME=/app/dagster_home
+RUN mkdir -p $DAGSTER_HOME
+
+# Default command: Start Dagster Webserver
+CMD ["dagster", "dev", "-h", "0.0.0.0", "-p", "3000", "-m", "src.orchestration"]

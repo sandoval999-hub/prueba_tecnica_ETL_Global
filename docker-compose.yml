@@ -40,13 +40,15 @@ services:
       DB_NAME: seismic_db
       DB_USER: root
       DB_PASSWORD: atlas2025
+    ports:
+      - "3000:3000"
     volumes:
       - ./logs:/app/logs
       - ./output:/app/output
-    command: ["python", "main.py", "--mode", "daily"]
+      - ./data:/app/data
     networks:
       - seismic-net
-    restart: "no"
+    restart: "unless-stopped"
 
 volumes:
   mysql_data:
