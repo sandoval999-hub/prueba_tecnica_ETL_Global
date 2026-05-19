@@ -21,10 +21,10 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timedelta
+
 
 from src.logger_config import get_logger, setup_logging
-from src.utils import CircuitBreaker, CircuitBreakerOpen, get_db_url, load_config
+from src.utils import CircuitBreaker, get_db_url, load_config
 
 
 def parse_args() -> argparse.Namespace:

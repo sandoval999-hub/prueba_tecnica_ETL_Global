@@ -9,7 +9,7 @@ Outputs:
 
 from __future__ import annotations
 
-import os
+
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -61,7 +61,7 @@ def generate_report(
 
     # ── Build Markdown content ────────────────────────────────────────────────
     lines: List[str] = []
-    lines.append(f"# 🌍 Atlas Reinsurance Analytics — Seismic Pipeline Report")
+    lines.append("# 🌍 Atlas Reinsurance Analytics — Seismic Pipeline Report")
     lines.append(f"\n**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
     lines.append(f"**Mode:** `{run_metadata.get('mode', 'unknown')}`")
     if run_metadata.get("start_date"):
@@ -71,8 +71,8 @@ def generate_report(
     # Summary section
     lines.append("---")
     lines.append("\n## 📊 Global Summary\n")
-    lines.append(f"| Metric | Value |")
-    lines.append(f"|---|---|")
+    lines.append("| Metric | Value |")
+    lines.append("|---|---|")
     lines.append(f"| Total events loaded | **{len(events)}** |")
     lines.append(f"| Events discarded (quality) | {len(quality_entries)} |")
     lines.append(f"| Events quarantined | {len(quarantine_records)} |")
@@ -147,7 +147,7 @@ def _generate_charts(
         import matplotlib
         matplotlib.use("Agg")  # non-interactive backend
         import matplotlib.pyplot as plt
-        import numpy as np
+
     except ImportError:
         logger.warning("matplotlib not installed — skipping chart generation.")
         return

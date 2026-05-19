@@ -8,8 +8,7 @@ Marks: @pytest.mark.unit
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -66,7 +65,7 @@ class TestSeismicLoaderUnit:
         """Loading an empty list should return 0 without any DB calls."""
         from src.loader import SeismicLoader
 
-        with patch("src.loader.create_engine") as mock_engine:
+        with patch("src.loader.create_engine") as _mock_engine:
             loader = SeismicLoader("mysql+pymysql://x:y@localhost/db", sample_cfg)
             result = loader.load_events([], run_id=1)
         assert result == 0

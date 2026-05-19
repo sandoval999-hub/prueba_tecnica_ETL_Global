@@ -7,7 +7,6 @@ Marks: @pytest.mark.unit for fast unit tests.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
@@ -16,7 +15,7 @@ import pytest
 import requests
 
 from src.extractor import USGSExtractor
-from src.models import RegionConfig
+
 from src.utils import CircuitBreaker, CircuitBreakerOpen
 
 

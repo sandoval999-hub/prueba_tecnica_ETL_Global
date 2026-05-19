@@ -1,6 +1,6 @@
 from typing import List, Tuple, Any, Dict
 from datetime import datetime, timezone
-import os
+
 
 from dagster import asset, Config, AssetExecutionContext
 
@@ -9,7 +9,7 @@ from src.transformer import SeismicTransformer
 from src.loader import SeismicLoader
 from src.aggregator import DailyAggregator
 from src.reporter import generate_report
-from src.utils import load_config, get_db_url, CircuitBreaker, CircuitBreakerOpen, FileLock
+from src.utils import load_config, get_db_url, CircuitBreaker, FileLock
 from src.models import SeismicEvent, QuarantineRecord, PipelineRun
 from main import build_regions
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -33,7 +33,7 @@ class USGSGeometry(BaseModel):
             raise ValueError(
                 f"coordinates must have at least 3 elements (lon, lat, depth), got {len(v)}"
             )
-        lon, lat, depth = v[0], v[1], v[2]
+        lon, lat = v[0], v[1]
         if not (-180.0 <= lon <= 180.0):
             raise ValueError(f"longitude {lon} out of range [-180, 180]")
         if not (-90.0 <= lat <= 90.0):

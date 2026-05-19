@@ -9,11 +9,9 @@ Responsibilities:
   - Segment long historical date ranges into ≤30-day blocks
   - Integrate with the CircuitBreaker to fail fast when the API is down
 """
-
 from __future__ import annotations
 
 import json
-import os
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
